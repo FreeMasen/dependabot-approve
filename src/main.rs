@@ -34,6 +34,8 @@ struct CLIOptions {
     /// Don't confirm PR approvals, just approve them all
     #[structopt(short, long)]
     force: bool,
+    #[structopt(long)]
+    dry_run: bool,
 }
 
 #[tokio::main]
@@ -47,6 +49,7 @@ async fn main() -> Res<()> {
         api_key,
         key_path,
         force,
+        dry_run,
     } = opts;
     let token = if let Some(token) = api_key {
         token.trim().to_string()
@@ -57,16 +60,16 @@ async fn main() -> Res<()> {
         std::process::exit(67);
     };
     let c = get_client(&username, &token)?;
-    let prs = get_all_prs(&c, &owner, &repo)
+    let mut prs = get_all_prs(&c, &owner, &repo)
         .await
         .expect("failed to get PRs");
     println!("Dependabot PRs found\n----------");
+    prs.retain(|pr| {
+        pr.user.login.to_lowercase() == "dependabot-preview[bot]"
+            || pr.user.login.to_lowercase() == "dependabot[bot]"
+    });
     for (i, pr) in prs
         .iter()
-        .filter(|pr| {
-            pr.user.login.to_lowercase() == "dependabot-preview[bot]"
-                || pr.user.login.to_lowercase() == "dependabot[bot]"
-        })
         .enumerate()
     {
         let status = get_latest_status(&pr, &status_username, &c).await?;
@@ -75,10 +78,10 @@ async fn main() -> Res<()> {
 
     if force {
         for pr in prs {
-            submit_approval(&c, &pr).await?;
+            submit_approval(&c, &pr, dry_run).await?;
         }
     } else {
-        handle_confirm(&c, &prs).await?;
+        handle_confirm(&c, &prs, dry_run).await?;
     }
     
     Ok(())
@@ -101,7 +104,7 @@ fn get_client(username: &str, token: &str) -> Res<Client> {
     Ok(c)
 }
 
-async fn handle_confirm(c: &Client, prs: &[PullRequest]) -> Res<()> {
+async fn handle_confirm(c: &Client, prs: &[PullRequest], dry_run: bool) -> Res<()> {
     println!("Please enter which PRs you'd like to approve as a comma\nseparated list or 'all' for all entries");
     let stdin = std::io::stdin();
     let mut buf = std::io::BufReader::new(stdin);
@@ -110,7 +113,7 @@ async fn handle_confirm(c: &Client, prs: &[PullRequest]) -> Res<()> {
     let _bytes = buf.read_line(&mut out)?;
     if out.trim() == "all" {
         for pr in prs {
-            submit_approval(&c, &pr).await?;
+            submit_approval(&c, &pr, dry_run).await?;
         }
     } else {
         let selections = out
@@ -120,14 +123,18 @@ async fn handle_confirm(c: &Client, prs: &[PullRequest]) -> Res<()> {
             .collect::<Result<Vec<_>, std::num::ParseIntError>>()?;
         for selection in selections {
             if let Some(pr) = prs.get(selection) {
-                submit_approval(&c, &pr).await?;
+                submit_approval(&c, &pr, dry_run).await?;
             }
         }
     }
     Ok(())
 }
 
-async fn submit_approval(c: &Client, pr: &PullRequest) -> Res<()> {
+async fn submit_approval(c: &Client, pr: &PullRequest, dry_run: bool) -> Res<()> {
+    if dry_run {
+        println!("Dry run approval for {}", pr.title);
+        return Ok(())
+    }
     let body = Approval::new(&pr.head.sha);
     let res = c
         .post(&format!(
