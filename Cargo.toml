@@ -1,0 +1,15 @@
+[package]
+name = "dependabot-approve"
+version = "0.1.0"
+authors = ["Robert Masen <robert.masen@smartthings.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde_json = "1.0"
+reqwest = "0.10"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "0.2", features = ["macros"] }
+structopt = "0.3"
+chrono = { version = "0.4", features = ["serde"] }
