@@ -63,25 +63,33 @@ async fn main() -> Res<()> {
     let mut prs = get_all_prs(&c, &owner, &repo)
         .await
         .expect("failed to get PRs");
-    println!("Dependabot PRs found\n----------");
+    
     prs.retain(|pr| {
         pr.user.login.to_lowercase() == "dependabot-preview[bot]"
             || pr.user.login.to_lowercase() == "dependabot[bot]"
     });
-    for (i, pr) in prs
-        .iter()
-        .enumerate()
+    let mut with_status = Vec::with_capacity(prs.len());
+
+    for pr in prs.into_iter()
     {
-        let status = get_latest_status(&pr, &status_username, &c).await?;
+        if let Some(status) = get_latest_status(&pr, &status_username, &c).await? {
+            with_status.push((pr, status))
+        }
+    }
+    if with_status.is_empty() {
+        println!("No dependabot PRs found");
+        std::process::exit(0);
+    }
+    println!("Dependabot PRs found\n----------");
+    for (i, (pr, status)) in with_status.iter().enumerate() {
         println!("{} {}: {}", i + 1, pr.title, status);
     }
-
     if force {
-        for pr in prs {
+        for (pr, _) in with_status {
             submit_approval(&c, &pr, dry_run).await?;
         }
     } else {
-        handle_confirm(&c, &prs, dry_run).await?;
+        handle_confirm(&c, &with_status, dry_run).await?;
     }
     
     Ok(())
@@ -104,30 +112,65 @@ fn get_client(username: &str, token: &str) -> Res<Client> {
     Ok(c)
 }
 
-async fn handle_confirm(c: &Client, prs: &[PullRequest], dry_run: bool) -> Res<()> {
-    println!("Please enter which PRs you'd like to approve as a comma\nseparated list or 'all' for all entries");
-    let stdin = std::io::stdin();
-    let mut buf = std::io::BufReader::new(stdin);
-    use std::io::BufRead;
-    let mut out = String::new();
-    let _bytes = buf.read_line(&mut out)?;
-    if out.trim() == "all" {
-        for pr in prs {
-            submit_approval(&c, &pr, dry_run).await?;
-        }
-    } else {
-        let selections = out
-            .split(',')
-            .map(|s| s.trim())
-            .map(|s| s.parse::<usize>())
-            .collect::<Result<Vec<_>, std::num::ParseIntError>>()?;
-        for selection in selections {
-            if let Some(pr) = prs.get(selection) {
+async fn handle_confirm(c: &Client, prs: &[(PullRequest, String)], dry_run: bool) -> Res<()> {
+    match confirm()? {
+        Confirmation::All => {
+            for (pr, _) in prs {
                 submit_approval(&c, &pr, dry_run).await?;
+            }
+        },
+        Confirmation::Select(selections) => {
+            for selection in selections {
+                if let Some((pr, _)) = prs.get(selection) {
+                    submit_approval(&c, &pr, dry_run).await?;
+                } else {
+                    println!("Invalid option selected, skipping: {}", selection);
+                }
             }
         }
     }
     Ok(())
+}
+
+fn confirm() -> Res<Confirmation> {
+    use std::io::BufRead;
+    let stdin = std::io::stdin();
+    let mut buf = std::io::BufReader::new(stdin);
+    let mut captured = String::new();
+    println!("Please enter which PRs you'd like to approve as a comma\nseparated list or 'all' for all entries");
+    for i in 0..5 {
+        let _bytes = buf.read_line(&mut captured)?;
+        if let Some(c) = translate_stdin(&captured) {
+            return Ok(c)
+        }
+        if i == 4 {
+            eprintln!("Failed to parse input 5 times, exiting");
+        } else {
+            println!("Unable to parse input, please try again");
+            captured.clear();
+        }
+
+    }
+    std::process::exit(67)
+}
+
+fn translate_stdin(s: &str) -> Option<Confirmation> {
+    if s.trim() == "all" {
+        Some(Confirmation::All)
+    } else {
+        let selections = s
+            .split(',')
+            .map(|s| s.trim())
+            .map(|s| s.parse::<usize>())
+            .collect::<Result<Vec<_>, std::num::ParseIntError>>()
+            .ok()?;
+        Some(Confirmation::Select(selections))
+    }
+}
+
+enum Confirmation {
+    All,
+    Select(Vec<usize>)
 }
 
 async fn submit_approval(c: &Client, pr: &PullRequest, dry_run: bool) -> Res<()> {
@@ -233,7 +276,7 @@ async fn get_latest_status(
     pr: &PullRequest,
     status_user: &Option<String>,
     client: &Client,
-) -> Res<String> {
+) -> Res<Option<String>> {
     let json = client
         .get(&pr._links.statuses.href)
         .send()
@@ -245,7 +288,7 @@ async fn get_latest_status(
     let statuses: Vec<GHStatus> = serde_json::from_str(&json).unwrap();
     let fold_init = (
         chrono::Utc.ymd(1970, 01, 01).and_hms(0, 0, 0),
-        String::new(),
+        None,
     );
     let most_recent = if let Some(status_user) = status_user {
         statuses
@@ -259,9 +302,9 @@ async fn get_latest_status(
     Ok(most_recent.1)
 }
 
-fn status_fold(most_recent: (DateTime<Utc>, String), status: &GHStatus) -> (DateTime<Utc>, String) {
+fn status_fold(most_recent: (DateTime<Utc>, Option<String>), status: &GHStatus) -> (DateTime<Utc>, Option<String>) {
     if status.created_at > most_recent.0 {
-        (status.created_at, status.state.clone())
+        (status.created_at, Some(status.state.clone()))
     } else {
         most_recent
     }
