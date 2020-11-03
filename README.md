@@ -31,12 +31,14 @@ USAGE:
     dependabot-approve [FLAGS] [OPTIONS] --owner <owner> --repo <repo> --user <username>
 
 FLAGS:
-    -f, --force      Don't confirm PR approvals, just approve them all
+        --dry-run    Print the actions that would have been taken, don't approve anything
+        --force      Don't confirm PR approvals, just approve them all
     -h, --help       Prints help information
     -V, --version    Prints version information
 
 OPTIONS:
     -a, --api-key <api-key>                    Your api key from github
+    -f, --filter <filter>...                   PR statuses that will be considered
     -k, --key-path <key-path>                  Path to a file containing your api key from github
     -o, --owner <owner>                        The username of the repo to check for dependabot PRs
     -r, --repo <repo>                          The repo to check for the repo_user
@@ -86,10 +88,10 @@ successfully approved Bump acorn from 5.5.3 to 6.4.1
 successfully approved Bump atob from 2.0.3 to 2.1.2
 ```
 
-#### force approve all dependabot PRs for https://github.com/FreeMasen/WiredForge.com with a key file
+#### force approve all dependabot PRs for https://github.com/FreeMasen/WiredForge.com with a key file and a successful status
 
 ```
-$ dependabot-approve -u FreeMasen -o FreeMasen -r WiredForge.com -k ~/dependabot_key
+$ dependabot-approve -u FreeMasen -o FreeMasen -r WiredForge.com -k ~/dependabot_key --force -f success
 Dependabot PRs found
 ----------
 1 Bump lodash from 4.17.5 to 4.17.20: success

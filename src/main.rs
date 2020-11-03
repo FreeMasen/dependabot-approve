@@ -25,6 +25,9 @@ struct CLIOptions {
     /// The username of the status provider
     #[structopt(short, long)]
     status_username: Option<String>,
+    /// PR statuses that will be considered
+    #[structopt(short, long)]
+    filter: Option<Vec<String>>,
     /// Your api key from github
     #[structopt(short, long)]
     api_key: Option<String>,
@@ -32,8 +35,9 @@ struct CLIOptions {
     #[structopt(short, long)]
     key_path: Option<String>,
     /// Don't confirm PR approvals, just approve them all
-    #[structopt(short, long)]
+    #[structopt(long)]
     force: bool,
+    /// Print the actions that would have been taken, don't approve anything
     #[structopt(long)]
     dry_run: bool,
 }
@@ -46,11 +50,12 @@ async fn main() -> Res<()> {
         owner,
         repo,
         status_username,
+        filter,
         api_key,
         key_path,
         force,
         dry_run,
-    } = opts;
+    } = dbg!(opts);
     let token = if let Some(token) = api_key {
         token.trim().to_string()
     } else if let Some(path) = key_path {
@@ -69,17 +74,22 @@ async fn main() -> Res<()> {
             || pr.user.login.to_lowercase() == "dependabot[bot]"
     });
     let mut with_status = Vec::with_capacity(prs.len());
-
     for pr in prs.into_iter()
     {
         if let Some(status) = get_latest_status(&pr, &status_username, &c).await? {
             with_status.push((pr, status))
         }
     }
+    if let Some(filter) = filter {
+        with_status.retain(|(_, status)| {
+            filter.contains(status)
+        });
+    }
     if with_status.is_empty() {
         println!("No dependabot PRs found");
         std::process::exit(0);
     }
+    
     println!("Dependabot PRs found\n----------");
     for (i, (pr, status)) in with_status.iter().enumerate() {
         println!("{} {}: {}", i + 1, pr.title, status);
@@ -226,13 +236,12 @@ async fn get_all_prs(c: &Client, user: &str, repo: &str) -> Res<Vec<PullRequest>
     }
     let json = res.text()
         .await?;
-    
-    let ret = serde_json::from_str(&json).map_err(|e| {
-        if cfg!(debug_assertions) {
-            std::fs::write(&format!("{}.json", repo), &json).unwrap();
+    if let Ok(v) = std::env::var("DA_WRITE_STATUS_PRS") {
+        if v == "1" {
+            let _ = std::fs::write(format!("PRS.{}.{}.json", user, repo), &json);
         }
-        e
-    })?;
+    }
+    let ret = serde_json::from_str(&json)?;
     Ok(ret)
 }
 
@@ -285,6 +294,11 @@ async fn get_latest_status(
         .text()
         .await
         .unwrap();
+    if let Ok(v) = std::env::var("DA_WRITE_STATUS_JSON") {
+        if v == "1" {
+            let _ = std::fs::write(format!("statuses.{}.json", pr.title), &json);
+        }
+    }
     let statuses: Vec<GHStatus> = serde_json::from_str(&json).unwrap();
     let fold_init = (
         chrono::Utc.ymd(1970, 01, 01).and_hms(0, 0, 0),
