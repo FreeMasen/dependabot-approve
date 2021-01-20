@@ -24,7 +24,7 @@ select the top level `repo` scope.
 ### Command line help
 
 ```
-dependabot-approve 0.1.0
+dependabot-approve 0.2.0
 A utility for automating the approval of your dependabot pull requests
 
 USAGE:
@@ -34,6 +34,7 @@ FLAGS:
         --dry-run    Print the actions that would have been taken, don't approve anything
         --force      Don't confirm PR approvals, just approve them all
     -h, --help       Prints help information
+    -q, --quiet      Don't print the args table or results
     -V, --version    Prints version information
 
 OPTIONS:
