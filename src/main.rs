@@ -40,11 +40,15 @@ struct CLIOptions {
     /// Print the actions that would have been taken, don't approve anything
     #[structopt(long)]
     dry_run: bool,
+    /// Don't print the args table or results
+    #[structopt(short, long)]
+    quiet: bool,
 }
 
 #[tokio::main]
 async fn main() -> Res<()> {
     let opts = CLIOptions::from_args();
+    print_options(&opts);
     let CLIOptions {
         username,
         owner,
@@ -55,7 +59,8 @@ async fn main() -> Res<()> {
         key_path,
         force,
         dry_run,
-    } = dbg!(opts);
+        quiet,
+    } = opts;
     let token = if let Some(token) = api_key {
         token.trim().to_string()
     } else if let Some(path) = key_path {
@@ -105,6 +110,38 @@ async fn main() -> Res<()> {
     Ok(())
 }
 
+fn print_options(args: &CLIOptions) {
+    if args.quiet {
+        return;
+    }
+    println!("Running approvals");
+    println!("----------");
+    println!("Username: {}", args.username);
+    println!("Repo: {}/{}", args.owner, args.repo);
+    if let Some(status_username) = &args.status_username {
+        println!("Status posted by: {}", status_username);
+    }
+    if let Some(status_filter) = &args.filter {
+        print!("Acceptable statuses ");
+        for status in status_filter {
+            print!("{},", status);
+        }
+        println!();
+    }
+    if let Some(path) = &args.key_path {
+        println!("Using key path: {}", path);
+    }
+    if let Some(_) = args.api_key {
+        println!("Using an api key");
+    }
+    if args.dry_run {
+        println!("Dry run");
+    }
+    if args.force {
+        println!("Forced!")
+    }
+}
+
 fn get_client(username: &str, token: &str) -> Res<Client> {
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
@@ -131,7 +168,7 @@ async fn handle_confirm(c: &Client, prs: &[(PullRequest, String)], dry_run: bool
         },
         Confirmation::Select(selections) => {
             for selection in selections {
-                if let Some((pr, _)) = prs.get(selection) {
+                if let Some((pr, _)) = prs.get(selection.saturating_sub(1)) {
                     submit_approval(&c, &pr, dry_run).await?;
                 } else {
                     println!("Invalid option selected, skipping: {}", selection);
@@ -183,8 +220,8 @@ enum Confirmation {
     Select(Vec<usize>)
 }
 
-async fn submit_approval(c: &Client, pr: &PullRequest, dry_run: bool) -> Res<()> {
-    if dry_run {
+async fn submit_approval(c: &Client, pr: &PullRequest, dry_run: bool, quiet: bool) -> Res<()> {
+    if !quiet && dry_run {
         println!("Dry run approval for {}", pr.title);
         return Ok(())
     }
@@ -197,6 +234,9 @@ async fn submit_approval(c: &Client, pr: &PullRequest, dry_run: bool) -> Res<()>
         .body(serde_json::to_string(&body)?)
         .send()
         .await?;
+    if quiet {
+        return Ok(())
+    }
     if res.status().is_success() {
         println!("Successfully approved {}", pr.title);
     } else {
