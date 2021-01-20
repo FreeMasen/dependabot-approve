@@ -101,10 +101,10 @@ async fn main() -> Res<()> {
     }
     if force {
         for (pr, _) in with_status {
-            submit_approval(&c, &pr, dry_run).await?;
+            submit_approval(&c, &pr, dry_run, quiet).await?;
         }
     } else {
-        handle_confirm(&c, &with_status, dry_run).await?;
+        handle_confirm(&c, &with_status, dry_run, quiet).await?;
     }
     
     Ok(())
@@ -159,18 +159,18 @@ fn get_client(username: &str, token: &str) -> Res<Client> {
     Ok(c)
 }
 
-async fn handle_confirm(c: &Client, prs: &[(PullRequest, String)], dry_run: bool) -> Res<()> {
+async fn handle_confirm(c: &Client, prs: &[(PullRequest, String)], dry_run: bool, quiet: bool) -> Res<()> {
     match confirm()? {
         Confirmation::All => {
             for (pr, _) in prs {
-                submit_approval(&c, &pr, dry_run).await?;
+                submit_approval(&c, &pr, dry_run, quiet).await?;
             }
         },
         Confirmation::Select(selections) => {
             for selection in selections {
                 if let Some((pr, _)) = prs.get(selection.saturating_sub(1)) {
-                    submit_approval(&c, &pr, dry_run).await?;
-                } else {
+                    submit_approval(&c, &pr, dry_run, quiet).await?;
+                } else if !quiet {
                     println!("Invalid option selected, skipping: {}", selection);
                 }
             }
