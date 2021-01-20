@@ -1,6 +1,6 @@
 [package]
 name = "dependabot-approve"
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Robert Masen <robert.masen@smartthings.com>"]
 edition = "2018"
 
