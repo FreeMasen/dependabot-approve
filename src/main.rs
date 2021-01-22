@@ -1,4 +1,4 @@
-use chrono::TimeZone;
+use chrono::{Duration, TimeZone};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -249,14 +249,20 @@ async fn submit_approval(c: &Client, pr: &PullRequest, dry_run: bool, quiet: boo
 }
 
 async fn post_with_retry(c: &Client, url: &str, body: String) -> Res<Response> {
-    let mut last_err = None;
-    for _ in 0..5 {
-        match c.post(url).body(body.clone()).send().await {
+    let mut ct = 0;
+    let last_err = loop {
+        let err = match c.post(url).body(body.clone()).send().await {
             Ok(r) => return Ok(r),
-            Err(e) => last_err = Some(e),
+            Err(e) => e,
+        };
+        ct += 1;
+        if ct >= 5 {
+            break err
+        } else {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         }
-    }
-    Err(Box::new(last_err.unwrap()))
+    };
+    Err(Box::new(last_err))
 }
 
 #[derive(Serialize)]
@@ -300,14 +306,20 @@ async fn get_all_prs(c: &Client, user: &str, repo: &str) -> Res<Vec<PullRequest>
 }
 
 async fn get_with_retry(c: &Client, url: &str) -> Res<Response> {
-    let mut last_err = None;
-    for _ in 0..5 {
-        match c.get(url).send().await {
+    let mut ct = 0;
+    let last_err = loop {
+        let err = match c.get(url).send().await {
             Ok(r) => return Ok(r),
-            Err(e) => last_err = Some(e),
+            Err(e) => e,
+        };
+        ct += 1;
+        if ct >= 5 {
+            break err
+        } else {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
         }
-    }
-    Err(Box::new(last_err.unwrap()))
+    };
+    Err(Box::new(last_err))
 }
 
 #[derive(Deserialize, Debug)]
