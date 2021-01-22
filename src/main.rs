@@ -1,4 +1,4 @@
-use chrono::{Duration, TimeZone};
+use chrono::TimeZone;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
