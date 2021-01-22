@@ -351,14 +351,10 @@ async fn get_latest_status(
     status_user: &Option<String>,
     client: &Client,
 ) -> Res<Option<String>> {
-    let json = client
-        .get(&pr._links.statuses.href)
-        .send()
-        .await
-        .unwrap()
+    let json = get_with_retry(client, &pr._links.statuses.href)
+        .await?
         .text()
-        .await
-        .unwrap();
+        .await?;
     if let Ok(v) = std::env::var("DA_WRITE_STATUS_JSON") {
         if v == "1" {
             let _ = std::fs::write(format!("statuses.{}.json", pr.title), &json);
