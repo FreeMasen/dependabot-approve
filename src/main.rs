@@ -6,7 +6,7 @@ use structopt::StructOpt;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
-use reqwest::Client;
+use reqwest::{Client, Response};
 
 const BASE_URL: &str = "https://api.github.com";
 
@@ -266,9 +266,7 @@ impl Approval {
 }
 
 async fn get_all_prs(c: &Client, user: &str, repo: &str) -> Res<Vec<PullRequest>> {
-    let res = c
-        .get(&format!("{}/repos/{}/{}/pulls", BASE_URL, user, repo))
-        .send()
+    let res = get_with_retry(c, &format!("{}/repos/{}/{}/pulls", BASE_URL, user, repo))
         .await?;
     if !res.status().is_success() {
         eprintln!("Failed to get pull requests for {}/{}: {}", user, repo, res.status());
@@ -283,6 +281,19 @@ async fn get_all_prs(c: &Client, user: &str, repo: &str) -> Res<Vec<PullRequest>
     }
     let ret = serde_json::from_str(&json)?;
     Ok(ret)
+}
+
+async fn get_with_retry(c: &Client, url: &str) -> Res<Response> {
+    let mut last_err = None;
+    for _ in 0..5 {
+        match c.get(url)
+        .send()
+        .await {
+            Ok(r) => return Ok(r),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(Box::new(last_err.unwrap()))
 }
 
 #[derive(Deserialize, Debug)]
