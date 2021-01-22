@@ -73,28 +73,25 @@ async fn main() -> Res<()> {
     let mut prs = get_all_prs(&c, &owner, &repo)
         .await
         .expect("failed to get PRs");
-    
+
     prs.retain(|pr| {
         pr.user.login.to_lowercase() == "dependabot-preview[bot]"
             || pr.user.login.to_lowercase() == "dependabot[bot]"
     });
     let mut with_status = Vec::with_capacity(prs.len());
-    for pr in prs.into_iter()
-    {
+    for pr in prs.into_iter() {
         if let Some(status) = get_latest_status(&pr, &status_username, &c).await? {
             with_status.push((pr, status))
         }
     }
     if let Some(filter) = filter {
-        with_status.retain(|(_, status)| {
-            filter.contains(status)
-        });
+        with_status.retain(|(_, status)| filter.contains(status));
     }
     if with_status.is_empty() {
         println!("No dependabot PRs found");
         std::process::exit(0);
     }
-    
+
     println!("Dependabot PRs found\n----------");
     for (i, (pr, status)) in with_status.iter().enumerate() {
         println!("{} {}: {}", i + 1, pr.title, status);
@@ -106,7 +103,7 @@ async fn main() -> Res<()> {
     } else {
         handle_confirm(&c, &with_status, dry_run, quiet).await?;
     }
-    
+
     Ok(())
 }
 
@@ -159,13 +156,18 @@ fn get_client(username: &str, token: &str) -> Res<Client> {
     Ok(c)
 }
 
-async fn handle_confirm(c: &Client, prs: &[(PullRequest, String)], dry_run: bool, quiet: bool) -> Res<()> {
+async fn handle_confirm(
+    c: &Client,
+    prs: &[(PullRequest, String)],
+    dry_run: bool,
+    quiet: bool,
+) -> Res<()> {
     match confirm()? {
         Confirmation::All => {
             for (pr, _) in prs {
                 submit_approval(&c, &pr, dry_run, quiet).await?;
             }
-        },
+        }
         Confirmation::Select(selections) => {
             for selection in selections {
                 if let Some((pr, _)) = prs.get(selection.saturating_sub(1)) {
@@ -188,7 +190,7 @@ fn confirm() -> Res<Confirmation> {
     for i in 0..5 {
         let _bytes = buf.read_line(&mut captured)?;
         if let Some(c) = translate_stdin(&captured) {
-            return Ok(c)
+            return Ok(c);
         }
         if i == 4 {
             eprintln!("Failed to parse input 5 times, exiting");
@@ -196,7 +198,6 @@ fn confirm() -> Res<Confirmation> {
             println!("Unable to parse input, please try again");
             captured.clear();
         }
-
     }
     std::process::exit(67)
 }
@@ -217,25 +218,26 @@ fn translate_stdin(s: &str) -> Option<Confirmation> {
 
 enum Confirmation {
     All,
-    Select(Vec<usize>)
+    Select(Vec<usize>),
 }
 
 async fn submit_approval(c: &Client, pr: &PullRequest, dry_run: bool, quiet: bool) -> Res<()> {
     if !quiet && dry_run {
         println!("Dry run approval for {}", pr.title);
-        return Ok(())
+        return Ok(());
     }
     let body = Approval::new(&pr.head.sha);
-    let res = c
-        .post(&format!(
+    let res = post_with_retry(
+        c,
+        &format!(
             "{}/repos/{}/{}/pulls/{}/reviews",
             BASE_URL, &pr.base.repo.owner.login, &pr.base.repo.name, pr.number
-        ))
-        .body(serde_json::to_string(&body)?)
-        .send()
-        .await?;
+        ),
+        serde_json::to_string(&body)?,
+    )
+    .await?;
     if quiet {
-        return Ok(())
+        return Ok(());
     }
     if res.status().is_success() {
         println!("Successfully approved {}", pr.title);
@@ -244,6 +246,17 @@ async fn submit_approval(c: &Client, pr: &PullRequest, dry_run: bool, quiet: boo
         eprintln!("{}", res.status().as_str());
     }
     Ok(())
+}
+
+async fn post_with_retry(c: &Client, url: &str, body: String) -> Res<Response> {
+    let mut last_err = None;
+    for _ in 0..5 {
+        match c.post(url).body(body.clone()).send().await {
+            Ok(r) => return Ok(r),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    Err(Box::new(last_err.unwrap()))
 }
 
 #[derive(Serialize)]
@@ -266,14 +279,17 @@ impl Approval {
 }
 
 async fn get_all_prs(c: &Client, user: &str, repo: &str) -> Res<Vec<PullRequest>> {
-    let res = get_with_retry(c, &format!("{}/repos/{}/{}/pulls", BASE_URL, user, repo))
-        .await?;
+    let res = get_with_retry(c, &format!("{}/repos/{}/{}/pulls", BASE_URL, user, repo)).await?;
     if !res.status().is_success() {
-        eprintln!("Failed to get pull requests for {}/{}: {}", user, repo, res.status());
+        eprintln!(
+            "Failed to get pull requests for {}/{}: {}",
+            user,
+            repo,
+            res.status()
+        );
         std::process::exit(1);
     }
-    let json = res.text()
-        .await?;
+    let json = res.text().await?;
     if let Ok(v) = std::env::var("DA_WRITE_STATUS_PRS") {
         if v == "1" {
             let _ = std::fs::write(format!("PRS.{}.{}.json", user, repo), &json);
@@ -286,9 +302,7 @@ async fn get_all_prs(c: &Client, user: &str, repo: &str) -> Res<Vec<PullRequest>
 async fn get_with_retry(c: &Client, url: &str) -> Res<Response> {
     let mut last_err = None;
     for _ in 0..5 {
-        match c.get(url)
-        .send()
-        .await {
+        match c.get(url).send().await {
             Ok(r) => return Ok(r),
             Err(e) => last_err = Some(e),
         }
@@ -351,10 +365,7 @@ async fn get_latest_status(
         }
     }
     let statuses: Vec<GHStatus> = serde_json::from_str(&json).unwrap();
-    let fold_init = (
-        chrono::Utc.ymd(1970, 01, 01).and_hms(0, 0, 0),
-        None,
-    );
+    let fold_init = (chrono::Utc.ymd(1970, 01, 01).and_hms(0, 0, 0), None);
     let most_recent = if let Some(status_user) = status_user {
         statuses
             .iter()
@@ -367,7 +378,10 @@ async fn get_latest_status(
     Ok(most_recent.1)
 }
 
-fn status_fold(most_recent: (DateTime<Utc>, Option<String>), status: &GHStatus) -> (DateTime<Utc>, Option<String>) {
+fn status_fold(
+    most_recent: (DateTime<Utc>, Option<String>),
+    status: &GHStatus,
+) -> (DateTime<Utc>, Option<String>) {
     if status.created_at > most_recent.0 {
         (status.created_at, Some(status.state.clone()))
     } else {
