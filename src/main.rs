@@ -8,8 +8,12 @@ type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
 use reqwest::{Client, Response};
 
+#[cfg(not(feature = "env_base_url"))]
 const BASE_URL: &str = "https://api.github.com";
-
+#[cfg(featuer = "env_base_url")]
+lazy_static::lazy_static!{
+    static ref BASE_URL: String = std::env::var("GITHUB_BASE_URL").unwrap().as_str().to_string();
+}
 
 #[derive(Debug, structopt::StructOpt)]
 enum Subcommands {
@@ -92,6 +96,7 @@ async fn main() -> Res<()> {
 }
 
 async fn approve_main(opts: CLIOptions) -> Res<()> {
+    
     print_options(&opts);
     let CLIOptions {
         username,
@@ -150,7 +155,7 @@ async fn clear_junk_main(opts: ClearJunkOptions) -> Res<()> {
     let client = get_client(&opts.username, &token)?;
     let prs = get_own_prs(&client, &opts.owner, &opts.repo, &opts.username).await;
     for pr in prs {
-        let reviews = find_junk_reviews(&client, &pr, opts.login, opts.text).await?;
+        let reviews = find_junk_reviews(&client, &pr, &opts.login, &opts.text).await?;
         for review in reviews {
             put_with_retry(&client, &format!("{base}/repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/dismissals", 
                 base=BASE_URL,
@@ -188,7 +193,7 @@ async fn get_own_prs(client: &Client, owner: &str, repo: &str, user: &str) -> Ve
     prs
 }
 
-async fn find_junk_reviews(client: &Client, pr: &PullRequest, login: Option<String>, text: Option<String>) -> Res<Vec<Review>> {
+async fn find_junk_reviews(client: &Client, pr: &PullRequest, login: &Option<String>, text: &Option<String>) -> Res<Vec<Review>> {
     let url = format!("{}/repos/{}/{}/pulls/{}/reviews", BASE_URL, pr.base.repo.owner.login, pr.base.repo.name, pr.number);
     let res = get_with_retry(client, &url).await?;
     if !res.status().is_success() {
@@ -206,7 +211,7 @@ async fn find_junk_reviews(client: &Client, pr: &PullRequest, login: Option<Stri
         }
     }
     let mut reviews: Vec<Review> = serde_json::from_str(&json)?;
-    reviews.retain(|r| r.is_junk(&login, &text));
+    reviews.retain(|r| r.is_junk(login, text));
     Ok(reviews)
 }
 

@@ -156,6 +156,7 @@ name = "dependabot-approve"
 version = "0.2.0"
 dependencies = [
  "chrono",
+ "lazy_static",
  "log",
  "pretty_env_logger",
  "reqwest",
