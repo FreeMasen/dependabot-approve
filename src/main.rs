@@ -10,6 +10,13 @@ use reqwest::{Client, Response};
 
 const BASE_URL: &str = "https://api.github.com";
 
+
+#[derive(Debug, structopt::StructOpt)]
+enum Subcommands {
+    Approve(CLIOptions),
+    ClearJunk(ClearJunkOptions),
+}
+
 ///A utility for automating the approval of your dependabot pull requests.
 #[derive(Debug, structopt::StructOpt)]
 struct CLIOptions {
@@ -45,9 +52,46 @@ struct CLIOptions {
     quiet: bool,
 }
 
+#[derive(Debug, structopt::StructOpt)]
+struct ClearJunkOptions {
+    /// The username tied to the api key used to run this program
+    #[structopt(short, long = "user")]
+    username: String,
+    /// The username of the repo to check for dependabot PRs
+    #[structopt(short, long)]
+    owner: String,
+    /// The repo to check for the repo_user
+    #[structopt(short, long)]
+    repo: String,
+    /// Your api key from github
+    #[structopt(short, long)]
+    api_key: Option<String>,
+    /// Path to a file containing your api key from github
+    #[structopt(short, long)]
+    key_path: Option<String>,
+    /// Print the actions that would have been taken, don't approve anything
+    #[structopt(long)]
+    dry_run: bool,
+    /// The user login to use to detect for junk reviews
+    #[structopt(short, long)]
+    login: Option<String>,
+    /// The text content to use to detect junk reviews
+    #[structopt(short, long)]
+    text: Option<String>,
+}
+
+
 #[tokio::main]
 async fn main() -> Res<()> {
-    let opts = CLIOptions::from_args();
+    pretty_env_logger::init();
+    match Subcommands::from_args() {
+        Subcommands::Approve(opts) => approve_main(opts).await,
+        Subcommands::ClearJunk(opts) => clear_junk_main(opts).await,
+    }
+    
+}
+
+async fn approve_main(opts: CLIOptions) -> Res<()> {
     print_options(&opts);
     let CLIOptions {
         username,
@@ -61,14 +105,7 @@ async fn main() -> Res<()> {
         dry_run,
         quiet,
     } = opts;
-    let token = if let Some(token) = api_key {
-        token.trim().to_string()
-    } else if let Some(path) = key_path {
-        std::fs::read_to_string(path)?.trim().to_string()
-    } else {
-        eprintln!("either api key (-a) or api key file path (-k) is required");
-        std::process::exit(67);
-    };
+    let token = get_token(api_key, key_path)?;
     let c = get_client(&username, &token)?;
     let mut prs = get_all_prs(&c, &owner, &repo)
         .await
@@ -106,6 +143,73 @@ async fn main() -> Res<()> {
 
     Ok(())
 }
+
+
+async fn clear_junk_main(opts: ClearJunkOptions) -> Res<()> {
+    let token = get_token(opts.api_key, opts.key_path)?;
+    let client = get_client(&opts.username, &token)?;
+    let prs = get_own_prs(&client, &opts.owner, &opts.repo, &opts.username).await;
+    for pr in prs {
+        let reviews = find_junk_reviews(&client, &pr, opts.login, opts.text).await?;
+        for review in reviews {
+            put_with_retry(&client, &format!("{base}/repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/dismissals", 
+                base=BASE_URL,
+                owner=pr.base.repo.owner.login,
+                repo=pr.base.repo.name,
+                pull_number=pr.number,
+                review_id=review.id,
+            ),
+            r#"{"message":"junk"}"#.to_string()).await?;
+        }
+    }
+    todo!()
+}
+
+fn get_token(api_key: Option<String>, key_path: Option<String>) -> Res<String> {
+    if let Some(token) = api_key {
+        Ok(token.trim().to_string())
+    } else if let Some(path) = key_path {
+        let full = std::fs::read_to_string(path)?;
+        Ok(full.trim().to_string())
+    } else {
+        eprintln!("either api key (-a) or api key file path (-k) is required");
+        std::process::exit(67);
+    }
+}
+
+async fn get_own_prs(client: &Client, owner: &str, repo: &str, user: &str) -> Vec<PullRequest> {
+    let mut prs = get_all_prs(&client, &owner, &repo)
+        .await
+        .expect("failed to get PRs");
+
+    prs.retain(|pr| {
+        pr.user.login.to_lowercase() == user
+    });
+    prs
+}
+
+async fn find_junk_reviews(client: &Client, pr: &PullRequest, login: Option<String>, text: Option<String>) -> Res<Vec<Review>> {
+    let url = format!("{}/repos/{}/{}/pulls/{}/reviews", BASE_URL, pr.base.repo.owner.login, pr.base.repo.name, pr.number);
+    let res = get_with_retry(client, &url).await?;
+    if !res.status().is_success() {
+        eprintln!(
+            "Failed to get pull requests for {}: {}",
+            pr.comments_url,
+            res.status()
+        );
+        std::process::exit(1);
+    }
+    let json = res.text().await?;
+    if let Ok(v) = std::env::var("DA_WRITE_STATUS_PRS") {
+        if v == "1" {
+            let _ = std::fs::write(format!("PRS.{}.{}.json", pr.user.login, pr.number), &json);
+        }
+    }
+    let mut reviews: Vec<Review> = serde_json::from_str(&json)?;
+    reviews.retain(|r| r.is_junk(&login, &text));
+    Ok(reviews)
+}
+
 
 fn print_options(args: &CLIOptions) {
     if args.quiet {
@@ -249,10 +353,14 @@ async fn submit_approval(c: &Client, pr: &PullRequest, dry_run: bool, quiet: boo
 }
 
 async fn post_with_retry(c: &Client, url: &str, body: String) -> Res<Response> {
+    log::debug!("posting {}", url);
     let mut ct = 0;
     let last_err = loop {
         let err = match c.post(url).body(body.clone()).send().await {
-            Ok(r) => return Ok(r),
+            Ok(r) => {
+                log::debug!("success after {} tries", ct);
+                return Ok(r)
+            },
             Err(e) => e,
         };
         ct += 1;
@@ -306,10 +414,37 @@ async fn get_all_prs(c: &Client, user: &str, repo: &str) -> Res<Vec<PullRequest>
 }
 
 async fn get_with_retry(c: &Client, url: &str) -> Res<Response> {
+    log::debug!("getting {}", url);
     let mut ct = 0;
     let last_err = loop {
         let err = match c.get(url).send().await {
-            Ok(r) => return Ok(r),
+            Ok(r) => {
+                log::debug!("Success after {} requests", ct);
+                return Ok(r)
+            },
+            Err(e) => e,
+        };
+        ct += 1;
+        if ct >= 5 {
+            break err
+        } else {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        }
+    };
+    Err(Box::new(last_err))
+}
+
+async fn put_with_retry(c: &Client, url: &str, body: String) -> Res<Response> {
+    log::debug!("posting {}", url);
+    let mut ct = 0;
+    let last_err = loop {
+        let err = match c.put(url)
+        .header("Content-Type", "application/json")
+        .body(body.clone()).send().await {
+            Ok(r) => {
+                log::debug!("success after {} tries", ct);
+                return Ok(r)
+            },
             Err(e) => e,
         };
         ct += 1;
@@ -332,6 +467,9 @@ struct PullRequest {
     number: u32,
     base: Branch,
     head: Branch,
+    #[serde(default)]
+    review_comments_url: String,
+    comments_url: String,
 }
 
 #[derive(Deserialize, Debug, Default)]
@@ -339,6 +477,7 @@ struct Branch {
     repo: Repo,
     sha: String,
 }
+
 #[derive(Deserialize, Debug, Default)]
 struct Repo {
     owner: User,
@@ -402,4 +541,27 @@ struct GHStatus {
     created_at: DateTime<Utc>,
     creator: User,
     state: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct Review {
+    id: u64,
+    body: String,
+    user: User,
+}
+
+impl Review {
+    pub fn is_junk(&self, login: &Option<String>, text: &Option<String>) -> bool {
+        if let Some(login) = login {
+            if *login != self.user.login {
+                return false
+            }
+        }
+        if let Some(text) = text {
+            if !self.body.contains(text) {
+                return false
+            }
+        }
+        true
+    }
 }

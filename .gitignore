@@ -1,2 +1,5 @@
 /target
 api_key
+*.json
+*.log
+/.vscode

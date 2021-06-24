@@ -13,3 +13,5 @@ serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 structopt = "0.3"
 chrono = { version = "0.4", features = ["serde"] }
+log = "0.4"
+pretty_env_logger = "0.4"
