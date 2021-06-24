@@ -24,11 +24,27 @@ select the top level `repo` scope.
 ### Command line help
 
 ```
-dependabot-approve 0.2.0
+dependabot-approve 0.3.0
+
+USAGE:
+    dependabot-approve <SUBCOMMAND>
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+SUBCOMMANDS:
+    approve       A utility for automating the approval of your dependabot pull requests
+    clear-junk    
+    help          Prints this message or the help of the given subcommand(s)
+```
+
+```
+dependabot-approve-approve 0.3.0
 A utility for automating the approval of your dependabot pull requests
 
 USAGE:
-    dependabot-approve [FLAGS] [OPTIONS] --owner <owner> --repo <repo> --user <username>
+    dependabot-approve approve [FLAGS] [OPTIONS] --owner <owner> --repo <repo> --user <username>
 
 FLAGS:
         --dry-run    Print the actions that would have been taken, don't approve anything
@@ -47,11 +63,32 @@ OPTIONS:
     -u, --user <username>                      The username tied to the api key used to run this program
 ```
 
+```
+dependabot-approve-clear-junk 0.3.0
+
+USAGE:
+    dependabot-approve clear-junk [FLAGS] [OPTIONS] --owner <owner> --repo <repo> --user <username>
+
+FLAGS:
+        --dry-run    Print the actions that would have been taken, don't approve anything
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+OPTIONS:
+    -a, --api-key <api-key>      Your api key from github
+    -k, --key-path <key-path>    Path to a file containing your api key from github
+    -l, --login <login>          The user login to use to detect for junk reviews
+    -o, --owner <owner>          The username of the repo to check for dependabot PRs
+    -r, --repo <repo>            The repo to check for the repo_user
+    -t, --text <text>            The text content to use to detect junk reviews
+    -u, --user <username>        The username tied to the api key used to run this program
+```
+
 ### Example Usage
 
 #### approve all dependabot PRs for https://github.com/FreeMasen/WiredForge.com with a key file
 ```
-$ dependabot-approve -u FreeMasen -o FreeMasen -r WiredForge.com -k ~/dependabot_key
+$ dependabot-approve approve -u FreeMasen -o FreeMasen -r WiredForge.com -k ~/dependabot_key
 Dependabot PRs found
 ----------
 1 Bump lodash from 4.17.5 to 4.17.20: success
