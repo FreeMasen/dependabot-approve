@@ -1,8 +1,7 @@
 use chrono::TimeZone;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-
-use structopt::StructOpt;
+use clap::Parser;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -15,72 +14,73 @@ lazy_static::lazy_static!{
     static ref BASE_URL: String = std::env::var("GITHUB_BASE_URL").unwrap().as_str().to_string();
 }
 
-#[derive(Debug, structopt::StructOpt)]
+#[derive(Debug, Parser)]
+#[command(name = "dependabot-approve")]
 enum Subcommands {
     Approve(CLIOptions),
     ClearJunk(ClearJunkOptions),
 }
 
 ///A utility for automating the approval of your dependabot pull requests.
-#[derive(Debug, structopt::StructOpt)]
+#[derive(Debug, Parser)]
 struct CLIOptions {
     /// The username tied to the api key used to run this program
-    #[structopt(short, long = "user")]
+    #[arg(short, long = "user")]
     username: String,
     /// The username of the repo to check for dependabot PRs
-    #[structopt(short, long)]
+    #[arg(short, long)]
     owner: String,
     /// The repo to check for the repo_user
-    #[structopt(short, long)]
+    #[arg(short, long)]
     repo: String,
     /// The username of the status provider
-    #[structopt(short, long)]
+    #[arg(short, long)]
     status_username: Option<String>,
     /// PR statuses that will be considered
-    #[structopt(short, long)]
+    #[arg(short, long)]
     filter: Option<Vec<String>>,
     /// Your api key from github
-    #[structopt(short, long)]
+    #[arg(short, long)]
     api_key: Option<String>,
     /// Path to a file containing your api key from github
-    #[structopt(short, long)]
+    #[arg(short, long)]
     key_path: Option<String>,
     /// Don't confirm PR approvals, just approve them all
-    #[structopt(long)]
+    #[arg(long)]
     force: bool,
     /// Print the actions that would have been taken, don't approve anything
-    #[structopt(long)]
+    #[arg(long)]
     dry_run: bool,
     /// Don't print the args table or results
-    #[structopt(short, long)]
+    #[arg(short, long)]
     quiet: bool,
 }
 
-#[derive(Debug, structopt::StructOpt)]
+#[derive(Debug, Parser)]
 struct ClearJunkOptions {
     /// The username tied to the api key used to run this program
-    #[structopt(short, long = "user")]
+    #[arg(short, long = "user")]
     username: String,
     /// The username of the repo to check for dependabot PRs
-    #[structopt(short, long)]
+    #[arg(short, long)]
     owner: String,
     /// The repo to check for the repo_user
-    #[structopt(short, long)]
+    #[arg(short, long)]
     repo: String,
     /// Your api key from github
-    #[structopt(short, long)]
+    #[arg(short, long)]
     api_key: Option<String>,
     /// Path to a file containing your api key from github
-    #[structopt(short, long)]
+    #[arg(short, long)]
     key_path: Option<String>,
     /// Print the actions that would have been taken, don't approve anything
-    #[structopt(long)]
+    #[arg(long)]
     dry_run: bool,
     /// The user login to use to detect for junk reviews
-    #[structopt(short, long)]
+    #[arg(short, long)]
     login: Option<String>,
     /// The text content to use to detect junk reviews
-    #[structopt(short, long)]
+    #[arg(short, long)]
     text: Option<String>,
 }
 
@@ -88,7 +88,7 @@ struct ClearJunkOptions {
 #[tokio::main]
 async fn main() -> Res<()> {
     pretty_env_logger::init();
-    match Subcommands::from_args() {
+    match Subcommands::parse() {
         Subcommands::Approve(opts) => approve_main(opts).await,
         Subcommands::ClearJunk(opts) => clear_junk_main(opts).await,
     }
@@ -463,6 +463,7 @@ async fn put_with_retry(c: &Client, url: &str, body: String) -> Res<Response> {
 }
 
 #[derive(Deserialize, Debug)]
+#[allow(unused)]
 struct PullRequest {
     _links: Links,
     user: User,
