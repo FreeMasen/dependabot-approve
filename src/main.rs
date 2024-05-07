@@ -1,5 +1,5 @@
-use chrono::TimeZone;
-use chrono::{DateTime, Utc};
+
+use time::{macros::datetime, PrimitiveDateTime};
 use serde::{Deserialize, Serialize};
 use clap::Parser;
 
@@ -9,6 +9,7 @@ use reqwest::{Client, Response};
 
 #[cfg(not(feature = "env_base_url"))]
 const BASE_URL: &str = "https://api.github.com";
+
 #[cfg(featuer = "env_base_url")]
 lazy_static::lazy_static!{
     static ref BASE_URL: String = std::env::var("GITHUB_BASE_URL").unwrap().as_str().to_string();
@@ -518,7 +519,7 @@ async fn get_latest_status(
         }
     }
     let statuses: Vec<GHStatus> = serde_json::from_str(&json).unwrap();
-    let fold_init = (chrono::Utc.with_ymd_and_hms(1970, 1, 1, 0, 0, 0).unwrap(), None);
+    let fold_init = (datetime!(1970-01-01 0:00), None);
     let most_recent = if let Some(status_user) = status_user {
         statuses
             .iter()
@@ -532,9 +533,9 @@ async fn get_latest_status(
 }
 
 fn status_fold(
-    most_recent: (DateTime<Utc>, Option<String>),
+    most_recent: (PrimitiveDateTime, Option<String>),
     status: &GHStatus,
-) -> (DateTime<Utc>, Option<String>) {
+) -> (PrimitiveDateTime, Option<String>) {
     if status.created_at > most_recent.0 {
         (status.created_at, Some(status.state.clone()))
     } else {
@@ -544,7 +545,7 @@ fn status_fold(
 
 #[derive(Deserialize, Debug)]
 struct GHStatus {
-    created_at: DateTime<Utc>,
+    created_at: PrimitiveDateTime,
     creator: User,
     state: String,
 }
