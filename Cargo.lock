@@ -216,7 +216,6 @@ name = "dependabot-approve"
 version = "0.3.0"
 dependencies = [
  "clap",
- "lazy_static",
  "log",
  "pretty_env_logger",
  "reqwest",

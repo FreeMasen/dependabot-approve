@@ -15,8 +15,6 @@ clap = { version = "4.5", features = ["derive"] }
 time = { version = "0.3", features = ["serde", "macros"] }
 log = "0.4"
 pretty_env_logger = "0.4"
-lazy_static = {version = "1.4", optional = true}
 
 [features]
 default = []
-env_base_url = ["lazy_static"]

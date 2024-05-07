@@ -2,18 +2,13 @@
 use time::{macros::datetime, PrimitiveDateTime};
 use serde::{Deserialize, Serialize};
 use clap::Parser;
+use std::sync::OnceLock;
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
 use reqwest::{Client, Response};
 
-#[cfg(not(feature = "env_base_url"))]
-const BASE_URL: &str = "https://api.github.com";
-
-#[cfg(featuer = "env_base_url")]
-lazy_static::lazy_static!{
-    static ref BASE_URL: String = std::env::var("GITHUB_BASE_URL").unwrap().as_str().to_string();
-}
+static BASE_URL: OnceLock<String> = OnceLock::new();
 
 #[derive(Debug, Parser)]
 #[command(name = "dependabot-approve")]
@@ -89,11 +84,24 @@ struct ClearJunkOptions {
 #[tokio::main]
 async fn main() -> Res<()> {
     pretty_env_logger::init();
+    ensure_base_url();
     match Subcommands::parse() {
         Subcommands::Approve(opts) => approve_main(opts).await,
         Subcommands::ClearJunk(opts) => clear_junk_main(opts).await,
     }
     
+}
+
+fn ensure_base_url() {
+    let base = match std::env::var("GITHUB_BASE_URL") {
+        Ok(base) if !base.is_empty() => {
+            base
+        },
+        _ => {
+            "https://api.github.com".to_string()
+        }
+    };
+    BASE_URL.set(base).expect("BASE_URL is unset");
 }
 
 async fn approve_main(opts: CLIOptions) -> Res<()> {
@@ -159,7 +167,7 @@ async fn clear_junk_main(opts: ClearJunkOptions) -> Res<()> {
         let reviews = find_junk_reviews(&client, &pr, &opts.login, &opts.text).await?;
         for review in reviews {
             put_with_retry(&client, &format!("{base}/repos/{owner}/{repo}/pulls/{pull_number}/reviews/{review_id}/dismissals", 
-                base=BASE_URL,
+                base=BASE_URL.get().expect("BASE_URL"),
                 owner=pr.base.repo.owner.login,
                 repo=pr.base.repo.name,
                 pull_number=pr.number,
@@ -195,7 +203,7 @@ async fn get_own_prs(client: &Client, owner: &str, repo: &str, user: &str) -> Ve
 }
 
 async fn find_junk_reviews(client: &Client, pr: &PullRequest, login: &Option<String>, text: &Option<String>) -> Res<Vec<Review>> {
-    let url = format!("{}/repos/{}/{}/pulls/{}/reviews", BASE_URL, pr.base.repo.owner.login, pr.base.repo.name, pr.number);
+    let url = format!("{}/repos/{}/{}/pulls/{}/reviews", BASE_URL.get().expect("BASE_URL"), pr.base.repo.owner.login, pr.base.repo.name, pr.number);
     let res = get_with_retry(client, &url).await?;
     if !res.status().is_success() {
         eprintln!(
@@ -341,7 +349,7 @@ async fn submit_approval(c: &Client, pr: &PullRequest, dry_run: bool, quiet: boo
         c,
         &format!(
             "{}/repos/{}/{}/pulls/{}/reviews",
-            BASE_URL, &pr.base.repo.owner.login, &pr.base.repo.name, pr.number
+            BASE_URL.get().expect("BASE_URL"), &pr.base.repo.owner.login, &pr.base.repo.name, pr.number
         ),
         serde_json::to_string(&body)?,
     )
@@ -399,7 +407,7 @@ impl Approval {
 }
 
 async fn get_all_prs(c: &Client, user: &str, repo: &str) -> Res<Vec<PullRequest>> {
-    let res = get_with_retry(c, &format!("{}/repos/{}/{}/pulls", BASE_URL, user, repo)).await?;
+    let res = get_with_retry(c, &format!("{}/repos/{}/{}/pulls", BASE_URL.get().expect("BASE_URL"), user, repo)).await?;
     if !res.status().is_success() {
         eprintln!(
             "Failed to get pull requests for {}/{}: {}",
