@@ -518,7 +518,7 @@ async fn get_latest_status(
         }
     }
     let statuses: Vec<GHStatus> = serde_json::from_str(&json).unwrap();
-    let fold_init = (chrono::Utc.ymd(1970, 01, 01).and_hms(0, 0, 0), None);
+    let fold_init = (chrono::Utc.with_ymd_and_hms(1970, 1, 1, 0, 0, 0).unwrap(), None);
     let most_recent = if let Some(status_user) = status_user {
         statuses
             .iter()
